@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>理科5班理科13班成绩分析系统</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; background-color: #f3f4f6; }
+        .card { background: white; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); padding: 20px; }
+        .upload-area { border: 2px dashed #3b82f6; background: #eff6ff; transition: all 0.3s; }
+        .upload-area:hover { background: #dbeafe; border-color: #2563eb; }
+        .stat-value { font-size: 1.5rem; font-weight: bold; color: #111827; }
+        .chart-container { width: 100%; height: 350px; }
+        /* 隐藏滚动条但保留功能 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="p-4 md:p-8 max-w-7xl mx-auto min-h-screen flex flex-col relative">
+
+    <div id="uploadSection" class="flex flex-col items-center justify-center min-h-[50vh] transition-all duration-500">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">📊 班级成绩智能分析</h1>
+            <p class="text-gray-500">支持多次考试对比 · 智能识别姓名 · 全班排名统计</p>
+        </div>
+        
+        <label class="upload-area cursor-pointer flex flex-col items-center justify-center w-full max-w-2xl h-64 rounded-xl">
+            <div class="flex flex-col items-center justify-center pt-5 pb-6">
+                <svg class="w-12 h-12 mb-4 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
+                <p class="mb-2 text-lg text-gray-700 font-semibold">点击上传 Excel 成绩表 (.xlsx)</p>
+                <p class="text-sm text-gray-500">请确保表格包含“姓名、英语、计算机、数学”等列</p>
+            </div>
+            <input type="file" id="fileInput" class="hidden" accept=".xlsx, .xls" />
+        </label>
+        <div id="errorMsg" class="mt-4 text-red-500 font-bold hidden"></div>
+    </div>
+
+    <div id="dashboard" class="hidden w-full">
+        <div class="flex flex-col md:flex-row justify-between items-center mb-6 bg-white p-4 rounded-xl shadow-sm sticky top-0 z-20">
+            <div class="flex items-center gap-4 mb-4 md:mb-0">
+                <button onclick="location.reload()" class="text-sm text-gray-500 hover:text-blue-600 flex items-center gap-1">
+                    ← 重新上传
+                </button>
+                <h2 class="text-xl font-bold text-gray-800">成绩分析看板</h2>
+            </div>
+            
+            <div class="flex flex-wrap gap-4 items-center w-full md:w-auto justify-end">
+                <button onclick="openRankingModal()" class="px-4 py-2 bg-yellow-50 text-yellow-700 font-semibold rounded-lg hover:bg-yellow-100 transition flex items-center gap-2 border border-yellow-200 shadow-sm">
+                    🏆 查看全班总榜
+                </button>
+
+                <div class="flex items-center gap-2 bg-gray-50 p-1 rounded-lg border">
+                    <span class="text-gray-500 text-sm pl-2">当前同学:</span>
+                    <select id="studentSelect" class="p-1 bg-transparent font-medium outline-none w-32 md:w-48 text-gray-700">
+                        </select>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="card">
+                <div class="text-sm text-gray-500">最新考试总分</div>
+                <div class="stat-value" id="latestScore">-</div>
+            </div>
+            <div class="card">
+                <div class="text-sm text-gray-500">班级排名</div>
+                <div class="stat-value" id="latestRank">-</div>
+            </div>
+            <div class="card">
+                <div class="text-sm text-gray-500">最强学科</div>
+                <div class="stat-value text-blue-600" id="bestSubject">-</div>
+            </div>
+            <div class="card">
+                <div class="text-sm text-gray-500">与平均分差距</div>
+                <div class="stat-value" id="avgDiff">-</div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div class="card lg:col-span-2">
+                <div class="flex justify-between mb-4">
+                    <h3 class="font-bold text-gray-700">📈 个人成绩走势</h3>
+                </div>
+                <div id="trendChart" class="chart-container"></div>
+            </div>
+            <div class="card">
+                <h3 class="font-bold text-gray-700 mb-4">🎯 学科能力雷达</h3>
+                <div id="radarChart" class="chart-container"></div>
+            </div>
+        </div>
+
+        <div class="card overflow-hidden">
+            <h3 class="font-bold text-gray-700 mb-4">📝 个人历次成绩单</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-sm">
+                    <thead class="bg-gray-50 text-gray-600 border-b">
+                        <tr>
+                            <th class="p-3">考试名称</th>
+                            <th class="p-3">英语</th>
+                            <th class="p-3">计算机</th>
+                            <th class="p-3">数学</th>
+                            <th class="p-3">总分</th>
+                            <th class="p-3">排名</th>
+                            <th class="p-3">班级平均分</th>
+                        </tr>
+                    </thead>
+                    <tbody id="scoreTableBody" class="divide-y text-gray-700"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div id="rankingModal" class="fixed inset-0 z-50 hidden" aria-labelledby="modal-title" role="dialog" aria-modal="true">
+        <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity backdrop-blur-sm" onclick="closeRankingModal()"></div>
+
+        <div class="fixed inset-0 z-10 overflow-y-auto">
+            <div class="flex min-h-full items-center justify-center p-4 text-center sm:p-0">
+                <div class="relative transform overflow-hidden rounded-lg bg-white text-left shadow-xl transition-all sm:my-8 sm:w-full sm:max-w-4xl h-[85vh] flex flex-col">
+                    
+                    <div class="bg-white px-4 pt-5 pb-4 sm:p-6 border-b flex flex-col sm:flex-row justify-between items-center sticky top-0 z-10 gap-4">
+                        <div class="flex items-center gap-4">
+                            <h3 class="text-xl font-bold leading-6 text-gray-900" id="modal-title">🏆 全班成绩总榜</h3>
+                            <select id="rankingExamSelect" class="border border-gray-300 rounded px-3 py-1 text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500 bg-gray-50">
+                                </select>
+                        </div>
+                        <button onclick="closeRankingModal()" class="text-gray-400 hover:text-gray-500 focus:outline-none text-3xl font-light absolute top-2 right-4 sm:static">
+                            &times;
+                        </button>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto p-0 bg-gray-50">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50 sticky top-0 z-10 shadow-sm">
+                                <tr>
+                                    <th scope="col" class="py-3.5 pl-4 pr-3 text-left text-sm font-semibold text-gray-900 sm:pl-6 w-20">排名</th>
+                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 w-24">姓名</th>
+                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-900 w-20">总分</th>
+                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-500 hidden sm:table-cell">英语</th>
+                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-500 hidden sm:table-cell">计算机</th>
+                                    <th scope="col" class="px-3 py-3.5 text-left text-sm font-semibold text-gray-500 hidden sm:table-cell">数学</th>
+                                </tr>
+                            </thead>
+                            <tbody id="rankingTableBody" class="divide-y divide-gray-200 bg-white text-sm">
+                                </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    let globalData = { exams: [], students: {}, classAverages: {} };
+    let trendChart = null;
+    let radarChart = null;
+
+    document.getElementById('fileInput').addEventListener('change', handleFile);
+    document.getElementById('rankingExamSelect').addEventListener('change', (e) => updateRankingTable(e.target.value));
+
+    function handleFile(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            const data = new Uint8Array(e.target.result);
+            try {
+                const workbook = XLSX.read(data, {type: 'array'});
+                const firstSheetName = workbook.SheetNames[0];
+                const worksheet = workbook.Sheets[firstSheetName];
+                const rawJson = XLSX.utils.sheet_to_json(worksheet, {header: 1, defval: null});
+                
+                processData(rawJson);
+                
+                document.getElementById('uploadSection').classList.add('hidden');
+                document.getElementById('dashboard').classList.remove('hidden');
+                
+                initChartsAndData();
+
+            } catch (err) {
+                console.error(err);
+                const msgBox = document.getElementById('errorMsg');
+                msgBox.textContent = "解析失败：" + err.message + "。请确认表格格式。";
+                msgBox.classList.remove('hidden');
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    }
+
+    function processData(rows) {
+        globalData = { exams: [], students: {}, classAverages: {} };
+        let headerRowIdx = -1;
+        
+        // 寻找表头
+        for(let i=0; i<rows.length; i++) {
+            if (rows[i] && rows[i].includes('姓名')) {
+                headerRowIdx = i;
+                break;
+            }
+        }
+        if (headerRowIdx === -1) throw new Error("未找到'姓名'列");
+
+        const headerRow = rows[headerRowIdx];
+        const examNameRow = rows[headerRowIdx - 3] || rows[headerRowIdx - 1] || []; 
+
+        let examBlocks = [];
+        for (let col = 0; col < headerRow.length; col++) {
+            if (headerRow[col] === '姓名') {
+                let examName = examNameRow[col];
+                if (!examName && col > 0) {
+                     for(let k=col; k>=0; k--) {
+                         if(examNameRow[k]) { examName = examNameRow[k]; break; }
+                     }
+                }
+                if (!examName) examName = `考试 ${examBlocks.length + 1}`;
+                examName = examName.toString().trim().replace(/[\r\n]/g, '');
+                if(globalData.exams.includes(examName)) examName += ` (${col})`;
+
+                examBlocks.push({ name: examName, colIndex: col });
+                globalData.exams.push(examName);
+            }
+        }
+
+        // 读取数据行
+        for (let r = headerRowIdx + 1; r < rows.length; r++) {
+            const row = rows[r];
+            if (!row || row.length === 0) continue;
+
+            examBlocks.forEach(block => {
+                const c = block.colIndex;
+                const name = row[c];
+                // 忽略非学生行 (如平均分统计行)
+                if (!name || typeof name !== 'string' || name.trim() === '') return;
+                
+                // 过滤掉常见统计行关键词
+                const blacklist = ['平均分', '平均', '总分', 'Average', 'Mean', 'Total', 'Class Average'];
+                if (blacklist.some(kw => name.includes(kw))) return;
+
+                const cleanName = name.trim();
+                const getVal = (offset) => {
+                    const v = row[c + offset];
+                    if (v === '缺考' || v === '' || v === null || v === undefined) return null;
+                    const num = parseFloat(v);
+                    return isNaN(num) ? null : num;
+                };
+
+                const eng = getVal(1);
+                const comp = getVal(2);
+                const math = getVal(3);
+                const total = getVal(4);
+                const rank = row[c + 5];
+
+                if (!globalData.students[cleanName]) globalData.students[cleanName] = {};
+                globalData.students[cleanName][block.name] = {
+                    English: eng, Computer: comp, Math: math, Total: total, Rank: rank
+                };
+            });
+        }
+
+        // 计算班级平均 (仅基于有效学生)
+        globalData.exams.forEach(exam => {
+            let sums = { English:0, Computer:0, Math:0, Total:0 };
+            let counts = { English:0, Computer:0, Math:0, Total:0 };
+            
+            Object.values(globalData.students).forEach(stu => {
+                const s = stu[exam];
+                if(s) {
+                    ['English','Computer','Math','Total'].forEach(k => {
+                        if(s[k] !== null) { sums[k]+=s[k]; counts[k]++; }
+                    });
+                }
+            });
+
+            globalData.classAverages[exam] = {
+                English: counts.English ? (sums.English / counts.English).toFixed(1) : 0,
+                Computer: counts.Computer ? (sums.Computer / counts.Computer).toFixed(1) : 0,
+                Math: counts.Math ? (sums.Math / counts.Math).toFixed(1) : 0,
+                Total: counts.Total ? (sums.Total / counts.Total).toFixed(1) : 0
+            };
+        });
+    }
+
+    function initChartsAndData() {
+        trendChart = echarts.init(document.getElementById('trendChart'));
+        radarChart = echarts.init(document.getElementById('radarChart'));
+
+        const select = document.getElementById('studentSelect');
+        select.innerHTML = '';
+        const names = Object.keys(globalData.students).sort((a, b) => a.localeCompare(b, 'zh'));
+        names.forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = name;
+            select.appendChild(opt);
+        });
+
+        select.addEventListener('change', (e) => updateCharts(e.target.value));
+        window.addEventListener('resize', () => {
+            trendChart && trendChart.resize();
+            radarChart && radarChart.resize();
+        });
+
+        if (names.length > 0) updateCharts(names[0]);
+
+        // 初始化排名下拉框
+        const rankSelect = document.getElementById('rankingExamSelect');
+        rankSelect.innerHTML = '';
+        [...globalData.exams].reverse().forEach(ex => {
+            const opt = document.createElement('option');
+            opt.value = ex;
+            opt.textContent = ex;
+            rankSelect.appendChild(opt);
+        });
+    }
+
+    function updateCharts(studentName) {
+        if (!trendChart || !radarChart) return;
+
+        const studentScores = globalData.students[studentName];
+        const exams = globalData.exams;
+        let lastValidExam = exams[exams.length - 1];
+        let lastData = studentScores[lastValidExam] || {};
+        
+        let radarExam = lastValidExam;
+        if (lastData.Total === null) {
+            // 如果最新没成绩，往前找有成绩的画雷达图
+            for(let i=exams.length-2; i>=0; i--) {
+                if(studentScores[exams[i]]?.Total !== null) {
+                    radarExam = exams[i];
+                    break;
+                }
+            }
+        }
+        
+        document.getElementById('latestScore').innerText = lastData.Total !== null ? lastData.Total : '缺考';
+        document.getElementById('latestRank').innerText = lastData.Rank || '-';
+
+        let bestSub = '-';
+        let maxScore = -999;
+        const currentRadarData = studentScores[radarExam] || {};
+        ['English', 'Computer', 'Math'].forEach(sub => {
+            const val = currentRadarData[sub];
+            if (val !== null && val > maxScore) {
+                maxScore = val;
+                const map = {English:'英语', Computer:'计算机', Math:'数学'};
+                bestSub = map[sub];
+            }
+        });
+        document.getElementById('bestSubject').innerText = bestSub;
+
+        const avgTotal = globalData.classAverages[lastValidExam]?.Total || 0;
+        if (lastData.Total !== null) {
+            const diff = (lastData.Total - avgTotal).toFixed(1);
+            const color = diff >= 0 ? 'text-blue-600' : 'text-red-500';
+            const sign = diff >= 0 ? '+' : '';
+            document.getElementById('avgDiff').innerHTML = `<span class="${color} font-bold text-xl">${sign}${diff}</span>`;
+        } else {
+            document.getElementById('avgDiff').innerText = '-';
+        }
+
+        const sData = exams.map(e => studentScores[e]?.Total ?? null);
+        const aData = exams.map(e => globalData.classAverages[e]?.Total ?? null);
+
+        trendChart.setOption({
+            tooltip: { trigger: 'axis' },
+            legend: { data: ['个人总分', '班级平均分'], bottom: 0 },
+            grid: { left: '3%', right: '4%', bottom: '10%', top: '10%', containLabel: true },
+            xAxis: { type: 'category', data: exams },
+            yAxis: { type: 'value', scale: true },
+            series: [
+                {
+                    name: '个人总分',
+                    type: 'line',
+                    data: sData,
+                    smooth: true,
+                    connectNulls: true, 
+                    itemStyle: { color: '#3b82f6' },
+                    lineStyle: { width: 3 },
+                    symbolSize: 8
+                },
+                {
+                    name: '班级平均分',
+                    type: 'line',
+                    data: aData,
+                    smooth: true,
+                    itemStyle: { color: '#9ca3af' },
+                    lineStyle: { type: 'dashed' }
+                }
+            ]
+        }, true);
+
+        const rData = studentScores[radarExam] || {};
+        const rAvg = globalData.classAverages[radarExam] || {};
+        
+        radarChart.setOption({
+            tooltip: {},
+            radar: {
+                indicator: [
+                    { name: '英语', max: 120 },
+                    { name: '计算机', max: 100 },
+                    { name: '数学', max: 120 }
+                ],
+                radius: '65%',
+                center: ['50%', '50%']
+            },
+            series: [{
+                type: 'radar',
+                data: [
+                    {
+                        value: [rData.English||0, rData.Computer||0, rData.Math||0],
+                        name: '个人',
+                        itemStyle: { color: '#3b82f6' },
+                        areaStyle: { opacity: 0.2 }
+                    },
+                    {
+                        value: [rAvg.English||0, rAvg.Computer||0, rAvg.Math||0],
+                        name: '班级平均',
+                        itemStyle: { color: '#9ca3af' }
+                    }
+                ]
+            }]
+        });
+
+        const tbody = document.getElementById('scoreTableBody');
+        tbody.innerHTML = '';
+        [...exams].reverse().forEach(ex => {
+            const d = studentScores[ex] || {};
+            const a = globalData.classAverages[ex] || {};
+            const s = (v) => v === null || v === undefined ? '-' : v;
+            
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="p-3 font-medium">${ex}</td>
+                <td class="p-3">${s(d.English)}</td>
+                <td class="p-3">${s(d.Computer)}</td>
+                <td class="p-3">${s(d.Math)}</td>
+                <td class="p-3 font-bold text-gray-800">${s(d.Total)}</td>
+                <td class="p-3"><span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">${s(d.Rank)}</span></td>
+                <td class="p-3 text-gray-400 text-xs">${a.Total || '-'}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function openRankingModal() {
+        document.getElementById('rankingModal').classList.remove('hidden');
+        const select = document.getElementById('rankingExamSelect');
+        if(!select.value && globalData.exams.length > 0) {
+            select.value = globalData.exams[globalData.exams.length - 1];
+        }
+        updateRankingTable(select.value);
+    }
+
+    function closeRankingModal() {
+        document.getElementById('rankingModal').classList.add('hidden');
+    }
+
+    function updateRankingTable(examName) {
+        if(!examName) return;
+        const tbody = document.getElementById('rankingTableBody');
+        tbody.innerHTML = '';
+
+        let list = [];
+        Object.keys(globalData.students).forEach(name => {
+            const scoreObj = globalData.students[name][examName];
+            // 修改：只要有记录（哪怕Total是null）都加进去
+            if(scoreObj) {
+                list.push({
+                    name: name,
+                    ...scoreObj
+                });
+            }
+        });
+
+        // 修改排序逻辑：null 值会被排在最后
+        list.sort((a, b) => {
+            // 给 null 一个极小值，让它排在最后
+            const valA = (a.Total === null || a.Total === undefined) ? -999999 : a.Total;
+            const valB = (b.Total === null || b.Total === undefined) ? -999999 : b.Total;
+            return valB - valA;
+        });
+
+        list.forEach((item, index) => {
+            const tr = document.createElement('tr');
+            let rankDisplay = index + 1;
+            let rankClass = "text-gray-500 font-medium";
+            const rowClass = index % 2 === 0 ? 'bg-white' : 'bg-gray-50';
+
+            // 处理前三名图标
+            if (index === 0 && item.Total !== null) rankDisplay = '🥇 ' + rankDisplay, rankClass = "text-yellow-600 font-bold";
+            else if (index === 1 && item.Total !== null) rankDisplay = '🥈 ' + rankDisplay, rankClass = "text-gray-600 font-bold";
+            else if (index === 2 && item.Total !== null) rankDisplay = '🥉 ' + rankDisplay, rankClass = "text-orange-600 font-bold";
+
+            const s = (v) => v === null ? '-' : v;
+            // 如果缺考，显示总分为“缺考”，并标记样式
+            const totalDisplay = item.Total === null ? '<span class="text-red-400 text-xs">缺考</span>' : item.Total;
+
+            tr.className = rowClass;
+            tr.innerHTML = `
+                <td class="whitespace-nowrap py-3 pl-4 pr-3 text-sm ${rankClass} sm:pl-6">${rankDisplay}</td>
+                <td class="whitespace-nowrap px-3 py-3 text-sm font-medium text-gray-900">${item.name}</td>
+                <td class="whitespace-nowrap px-3 py-3 text-sm font-bold text-blue-600">${totalDisplay}</td>
+                <td class="whitespace-nowrap px-3 py-3 text-sm text-gray-500 hidden sm:table-cell">${s(item.English)}</td>
+                <td class="whitespace-nowrap px-3 py-3 text-sm text-gray-500 hidden sm:table-cell">${s(item.Computer)}</td>
+                <td class="whitespace-nowrap px-3 py-3 text-sm text-gray-500 hidden sm:table-cell">${s(item.Math)}</td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+</script>
+</body>
+</html>
